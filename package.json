@@ -1,0 +1,24 @@
+{
+  "name": "luxafor-linux-pomodoro",
+  "version": "0.0.1",
+  "description": "Pomodoro timer for Luxafor",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/markwallsgrove/luxafor-linux-pomodoro.git"
+  },
+  "keywords": [
+    "luxafor",
+    "pomodoro",
+    "cli"
+  ],
+  "author": "Mark Wallsgrove",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/markwallsgrove/luxafor-linux-pomodoro/issues"
+  },
+  "homepage": "https://github.com/markwallsgrove/luxafor-linux-pomodoro#readme"
+}
