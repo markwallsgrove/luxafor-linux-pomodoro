@@ -20,5 +20,8 @@
   "bugs": {
     "url": "https://github.com/markwallsgrove/luxafor-linux-pomodoro/issues"
   },
-  "homepage": "https://github.com/markwallsgrove/luxafor-linux-pomodoro#readme"
+  "homepage": "https://github.com/markwallsgrove/luxafor-linux-pomodoro#readme",
+  "dependencies": {
+    "terminal-kit": "^1.0.3"
+  }
 }
