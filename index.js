@@ -1,53 +1,127 @@
 const term = require('terminal-kit').terminal;
+const Plugins = require('js-plugins');
+const async = require('async');
 
-function ProgressBar(config) {
-    const progressBar = term.progressBar({
-        width: 80,
-        title: config.title,
-        eta: true,
-        percent: true,
-    });
+function capitalizeFirstLetter(string) {
+    return string.charAt(0).toUpperCase() + string.slice(1);
+}
 
-    const state = { progress: 0 };
-    const startTime = new Date() / 1000;
-    const max = config.time;
+// setup plugins
+const pluginManager = new Plugins();
+pluginManager.scan();
 
-    function doProgress(fulfill) {
-        const now = new Date() / 1000;
-        const current = now - startTime;
-        state.progress = current / max;
-        progressBar.update(state.progress);
+// register progress bar plugin
+// TODO: make this more generic, rest & work are pretty much the same
+// just use before and after then send in the stage name within the event
+pluginManager.register('luxafor-linux-pomodoro:events', 'ProgressBar', () => ({
+    beforeWork: (conf) => {
+        Promise((fulfill) => {
+            this.progressBar = term.progressBar({
+                width: 80,
+                title: conf.title,
+                eta: true,
+                percent: true,
+            });
 
-        if (state.progress >= 1) {
+            fulfill();
+        });
+    },
+    beforeRest: (conf) => {
+        Promise((fulfill) => {
+            this.progressBar = term.progressBar({
+                width: 80,
+                title: conf.title,
+                eta: true,
+                percent: true,
+            });
+
+            fulfill();
+        });
+    },
+    tick: (event) => {
+        Promise((fulfill) => {
+            this.progressBar.update(event.progress);
+            fulfill();
+        });
+    },
+    afterRest: () => {
+        Promise((fulfill) => {
             term('\n');
             fulfill();
-        } else {
-            setTimeout(() => { doProgress(fulfill); }, 100);
-        }
-    }
+        });
+    },
+    afterWork: () => {
+        Promise((fulfill) => {
+            term('\n');
+            fulfill();
+        });
+    },
+}));
 
-    return new Promise((fulfill) => {
-        doProgress(fulfill);
+
+function sendEvent(state, method, cb) {
+    pluginManager.connect({}, 'luxafor-linux-pomodoro:events', { multi: true }, (err, plugins) => {
+        async.each(plugins, (plugin, pluginCb) => {
+            plugin[method](state).then(pluginCb);
+        }, cb);
     });
 }
 
-const restConfig = { title: 'resting: ', time: 3 };
-const workConfig = { title: 'working: ', time: 3 };
+function iteration(conf, done) {
+    const name = capitalizeFirstLetter(conf.name);
+    const state = {
+        startTime: 0,
+        progress: 0,
+        max: conf.time,
+    };
 
-ProgressBar(workConfig).then(() => ProgressBar(restConfig)).then(() => {
-    term('job complete: ');
-    return new Promise((fulfill) => {
-        term.inputField({ }, (error, response) => {
-            console.log('response: ', response);
-            fulfill();
-        });
+    async.waterfall([
+        (cb) => {
+            sendEvent(conf, `before${name}`, cb);
+        },
+        (cb) => {
+            state.startTime = new Date() / 1000;
+            const interval = setInterval(() => {
+                const now = new Date() / 1000;
+                const current = now - state.startTime;
+                state.progress = current / state.max;
+
+                sendEvent(state, 'tick', () => {
+                    if (state.progress >= 1) {
+                        clearInterval(interval);
+                        cb();
+                    }
+                });
+            }, 500);
+        },
+        (cb) => {
+            sendEvent(state, `after${name}`, cb);
+        },
+    ], done);
+}
+
+function main() {
+    const config = {
+        rest: { name: 'rest', title: 'resting: ', time: 10 },
+        work: { name: 'work', title: 'working: ', time: 5 },
+    };
+
+
+    async.forever((next) => {
+        async.waterfall([
+            (cb) => { iteration(config.work, cb); },
+            (cb) => { iteration(config.rest, cb); },
+        ], (err) => { next(err, true); });
+    }, (err) => {
+        console.log('fin', err);
     });
-}).then(() => {
-    process.exit();
-});
+}
 
+if (require.main === module) {
+    main();
+}
 
-// TODO: continous iterations
+// TODO: load configuration from file
 // TODO: record start/end times and job complete
 // TODO: allow for commands to be executed on work/reset
 // TODO: configuration for work/rest times

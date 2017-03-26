@@ -22,6 +22,8 @@
   },
   "homepage": "https://github.com/markwallsgrove/luxafor-linux-pomodoro#readme",
   "dependencies": {
+    "async": "^2.2.0",
+    "js-plugins": "0.0.3",
     "terminal-kit": "^1.0.3"
   }
 }
