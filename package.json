@@ -24,6 +24,7 @@
   "dependencies": {
     "async": "^2.2.0",
     "js-plugins": "0.0.3",
+    "luxafor": "^1.1.1",
     "terminal-kit": "^1.0.3"
   }
 }
