@@ -3,10 +3,15 @@ const Plugins = require('js-plugins');
 const Luxafor = require('luxafor')();
 const async = require('async');
 const usb = require('usb');
+const winston = require('winston');
+const fs = require('fs');
+const path = require('path');
+const tilde = require('tilde-expansion');
 
 terminator = (signal) => {
     if (typeof signal === 'string') {
-       process.exit(1);
+        console.log('exitting');
+        process.exit(1);
     }
 };
 
@@ -17,14 +22,17 @@ terminator = (signal) => {
 });
 
 process.on('uncaughtException', function(err) {
-  console.log('Caught exception: ' + err);
+    console.log('Caught exception: ' + err);
+    console.log(err.stack);
 });
 
 // setup plugins
 const pluginManager = new Plugins();
 pluginManager.scan();
 
-pluginManager.register('luxafor-linux-pomodoro:events', 'ProgressBar', () => {
+pluginManager.register('luxafor-linux-pomodoro:events', 'progress-bar', (data, globalConfig, options) => {
+    const pc = globalConfig['progress-bar'] || {};
+
     term.on('key', (name , matches , data) => {
         if (name === 'CTRL_C') {
             term.grabInput( false ) ;
@@ -32,32 +40,27 @@ pluginManager.register('luxafor-linux-pomodoro:events', 'ProgressBar', () => {
         }
     }) ;
 
-    function progressBar(conf, cb) {
+    function progressBar(config, cb) {
         this.progressBar = term.progressBar({
-            width: 80,
-            title: conf.title,
-            eta: true,
-            percent: true,
+            width: config.width || pc.width || 80,
+            title: config.title || pc.title || 'progress',
+            eta: pc.eta == null ? true : pc.eta,
+            percent: pc.percent == null ? true : pc.percent,
         });
 
         cb();
     }
 
     return {
-        work: (conf) => {
+        on: (state, config) => {
             return new Promise((fulfill) => {
-                progressBar.bind(this)(conf, fulfill);
+                progressBar.bind(this)(config, fulfill);
             });
         },
-        rest: (conf) => {
+        tick: (state, config) => {
             return new Promise((fulfill) => {
-                progressBar.bind(this)(conf, fulfill);
-            });
-        },
-        tick: (event) => {
-            return new Promise((fulfill) => {
-                this.progressBar.update(event.progress);
-                if (event.progress >= 1) {
+                this.progressBar.update(state.progress);
+                if (state.progress >= 1) {
                     term('\n');
                 }
 
@@ -67,33 +70,72 @@ pluginManager.register('luxafor-linux-pomodoro:events', 'ProgressBar', () => {
     };
 });
 
-pluginManager.register('luxafor-linux-pomodoro:events', 'journal', () => {
+pluginManager.register('luxafor-linux-pomodoro:events', 'journal', (data, globalConfig, options) => {
+    const pc = globalConfig['journal'] || {};
+    const disabledSteps = pc.disabledSteps || [];
+    const logger = new (winston.Logger)({
+        transports: [ new (winston.transports.Console)({
+            timestamp: () => { return new Date() },
+            formatter: (options) => {
+                // Return string will be passed to logger.
+                const timestamp = options.timestamp();
+                const level = options.level.toUpperCase();
+                const msg = options.message ? options.message : '';
+                const meta = options.meta && Object.keys(options.meta).length
+                    ? '\n\t'+ JSON.stringify(options.meta)
+                    : '';
+
+                return `${timestamp} ${level} ${msg} ${meta}`;
+            }
+        })],
+    });
+
+    function isDisabled(config, disabledSteps) {
+        return config.journal === false ||
+            disabledSteps.indexOf(config.name) > -1;
+    }
+
     term.on('key', (name , matches , data) => {
         if (name === 'CTRL_C') {
-            term.grabInput( false ) ;
+            term.grabInput(false) ;
             setTimeout(() => { process.exit(); }, 100) ;
         }
     }) ;
 
     return {
-        beforerest: (conf) => {
-            // TODO record this information in a file
+        before: (state, config) => {
             return new Promise((fulfill) => {
-                term('what awesomeness have you demonstrated: ') ;
-                term.inputField({ cancelable: true }, (err, input) => {
-                    term('\n');
+                if (isDisabled(config, disabledSteps) == false) {
+                    logger.info('starting work');
+                }
+
+                fulfill();
+            });
+        },
+        after: (state, config) => {
+            // TODO: record this information in a file
+            // TODO: where should this configuration live?
+            return new Promise((fulfill) => {
+                if (isDisabled(config, disabledSteps)) {
                     fulfill();
-                });
+                } else {
+                    term('task: ') ;
+                    term.inputField({ cancelable: true }, (err, input) => {
+                        term('\n');
+                        logger.info(input);
+                        fulfill();
+                    });
+                }
             });
         },
     };
 });
 
-// most of this is just configuration rather than code
-// remove the precise task such as 'beforework' and
-// only implement 'before', 'on', 'tick', 'after' then
-// use the configuration object for colours, etc
-pluginManager.register('luxafor-linux-pomodoro:events', 'luxafor-flag', () => {
+pluginManager.register('luxafor-linux-pomodoro:events', 'luxafor-flag', (data, globalConfig, options) => {
+    const pc = globalConfig['luxafor-flag'] || {};
+    const defaultColour = Luxafor.colors.red;
+    const colours = pc.colours || {};
+
     function luxaforMissing() {
         // https://github.com/dave-irvine/node-luxafor/issues/1
         // hide bug in library where it doesn't check for the
@@ -102,7 +144,7 @@ pluginManager.register('luxafor-linux-pomodoro:events', 'luxafor-flag', () => {
     }
 
     return {
-        beforework: (conf) => {
+        before: (state, config) => {
             return new Promise((fulfill) => {
                 if (luxaforMissing()) {
                     fulfill();
@@ -110,53 +152,39 @@ pluginManager.register('luxafor-linux-pomodoro:events', 'luxafor-flag', () => {
                 }
 
                 Luxafor.init(() => {
-                    Luxafor.setLuxaforColor(Luxafor.colors.red, fulfill);
-                });
-            });
-        },
-        beforerest: (conf) => {
-            return new Promise((fulfill) => {
-                if (luxaforMissing()) {
-                    fulfill();
-                    return;
-                }
-
-                Luxafor.init(() => {
-                    Luxafor.setLuxaforColor(Luxafor.colors.green, fulfill);
+                    const colour = config.flagColour || colours[config.name];
+                    const luxaforColour = Luxafor.colors[colour] || defaultColour;
+                    Luxafor.setLuxaforColor(luxaforColour, fulfill);
                 });
             });
         },
     };
 });
 
-function sendEvent(state, method, cb) {
-    pluginManager.connect({}, 'luxafor-linux-pomodoro:events', { multi: true }, (err, plugins) => {
+function createSendEventFunc(plugins) {
+    return function sendEvent(state, config, method, cb) {
         async.each(plugins, (plugin, pluginCb) => {
             if (plugin[method]) {
-                plugin[method](state).then(pluginCb);
+                plugin[method](state, config)
+                    .then(pluginCb);
             } else {
                 pluginCb();
             }
         }, cb);
-    });
+    };
 }
 
-function iteration(conf, done) {
-    const name = conf.name;
+function iteration(config, sendEvent, done) {
+    const name = config.name;
     const state = {
         startTime: 0,
         progress: 0,
-        max: conf.time,
+        max: config.time,
     };
 
-    // TODO: implement before, on, tick, after
     async.waterfall([
-        (cb) => {
-            sendEvent(conf, `before${name}`, () => { cb(); });
-        },
-        (cb) => {
-            sendEvent(conf, name, () => { cb(); });
-        },
+        (cb) => { sendEvent(state, config, 'before', cb) },
+        (cb) => { sendEvent(state, config, 'on', cb) },
         (cb) => {
             state.startTime = new Date() / 1000;
             const interval = setInterval(() => {
@@ -164,7 +192,7 @@ function iteration(conf, done) {
                 const current = now - state.startTime;
                 state.progress = current / state.max;
 
-                sendEvent(state, 'tick', () => {
+                sendEvent(state, config, 'tick', () => {
                     if (state.progress >= 1) {
                         clearInterval(interval);
                         cb();
@@ -172,25 +200,52 @@ function iteration(conf, done) {
                 });
             }, 500);
         },
-        (cb) => {
-            sendEvent(state, `after${name}`, cb);
-        },
+        (cb) => { sendEvent(state, config, 'after', cb) },
     ], done);
 }
 
-function main() {
-    const config = {
-        work: { name: 'work', title: 'working: ', time: 5 },
-        rest: { name: 'rest', title: 'resting: ', time: 10 },
-    };
+function run(config, cb) {
+    pluginManager.connect(config.plugins, 'luxafor-linux-pomodoro:events', { multi: true }, (err, plugins) => {
+        const sendEvent = createSendEventFunc(plugins);
 
-    async.forever((next) => {
-        // TODO use the configuration and eachSeries
-        async.waterfall([
-            (cb) => { iteration(config.work, cb); },
-            (cb) => { iteration(config.rest, cb); },
-        ], (err) => { next(err, true); });
-    }, (err) => {
+        if (err) {
+            winston.error('startup', err);
+            return;
+        }
+
+        async.forever((next) => {
+            async.eachSeries(
+                config.iterations,
+                (config, cb) => { iteration(config, sendEvent, cb) },
+                (err) => { next(err, true) }
+            );
+        }, cb);
+    });
+}
+
+function main() {
+    const configLocation = path.resolve();
+
+    async.waterfall([
+        (cb) => {
+            tilde('~/.pomodoro.json', (location) => {
+                cb(null, path.resolve(location));
+            });
+        },
+        (location, cb) => {
+            fs.exists(location, (exists) => {
+                cb(exists ? null : 'missing config', location);
+            });
+        },
+        (location, cb) => {
+            fs.readFile(location, 'utf8', (err, data) => {
+                cb(err, JSON.parse(data));
+            });
+        },
+        (config, cb) => {
+            run(config, cb);
+        },
+    ], (err) => {
         console.log('fin', err);
     });
 }
@@ -199,8 +254,5 @@ if (require.main === module) {
     main();
 }
 
-// TODO: load configuration from file
-// TODO: record start/end times and job complete
+// TODO: write to journal file
 // TODO: allow for commands to be executed on work/reset
-// TODO: configuration for work/rest times
-// TODO: catch terminate signal
