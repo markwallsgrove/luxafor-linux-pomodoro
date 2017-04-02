@@ -7,6 +7,7 @@ const winston = require('winston');
 const fs = require('fs');
 const path = require('path');
 const tilde = require('tilde-expansion');
+const moment = require('moment');
 
 terminator = (signal) => {
     if (typeof signal === 'string') {
@@ -73,9 +74,14 @@ pluginManager.register('luxafor-linux-pomodoro:events', 'progress-bar', (data, g
 pluginManager.register('luxafor-linux-pomodoro:events', 'journal', (data, globalConfig, options) => {
     const pc = globalConfig['journal'] || {};
     const disabledSteps = pc.disabledSteps || [];
+    const today = moment().format('YYYYMMDD');
+    const logFolder = pc.logFolder || '/tmp';
     const logger = new (winston.Logger)({
-        transports: [ new (winston.transports.Console)({
-            timestamp: () => { return new Date() },
+        transports: [ new (winston.transports.File)({
+            name: 'log',
+            filename: `${logFolder}/${today}.log`, // TODO: need to resolve
+            level: 'info',
+            timestamp: () => { return moment().format() },
             formatter: (options) => {
                 // Return string will be passed to logger.
                 const timestamp = options.timestamp();
